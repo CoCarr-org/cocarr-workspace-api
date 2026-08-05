@@ -1,4 +1,5 @@
 const db = require('../configs/db');
+const { authMode } = require('../helper/authMode');
 
 // GET /v1/health — liveness + DB reachability. Safe to wire to a Railway
 // healthcheck once you want deploys gated on it.
@@ -9,6 +10,7 @@ async function health(req, res) {
     status: dbOk ? 'ok' : 'degraded',
     service: 'cocarr-workspace-api',
     db: dbOk,
+    auth: authMode(),
     time: new Date().toISOString(),
   });
 }
