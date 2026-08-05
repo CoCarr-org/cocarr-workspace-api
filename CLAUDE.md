@@ -122,10 +122,11 @@ as effective access.
 - `PORT` (default **3040**), binds `0.0.0.0`. Health: `GET /v1/health`. Docs: `/v1/docs`.
 - The app **listens even if the DB sync fails** (`.finally`), so `/v1/health`
   can report `db:false` rather than the process being unreachable.
-- Verified so far: all files syntax-clean, full require/wiring graph loads,
-  live HTTP smoke test (health/docs/validation/error-contract/404) with the DB
-  intentionally unreachable. A full DB-backed lifecycle run needs a MySQL
-  instance (see `cocarr-devops` compose).
+- Verified against a real MySQL: schema syncs (8 tables); permission enforcement
+  is live against cocarr-authorization-service — an operations-agent gets
+  `403 workspace.employees.read`, an hr-manager is served, and their
+  `POST /departments` persists a row. All four IAM failure modes (500, 401,
+  unreachable, absent) answer 503 rather than allowing.
 
 ## Not built yet (next)
 - Object-storage upload for employee documents (currently stores a `fileKey`
