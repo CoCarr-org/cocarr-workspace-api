@@ -64,4 +64,17 @@ async function deleteStaffUser(uid) {
   await admin.auth(app).deleteUser(uid);
 }
 
-module.exports = { isConfigured, createStaffUser, generatePasswordResetLink, deleteStaffUser };
+// MUST go through `app`. This service initialises a NAMED app
+// ('workspace-admin'), so `admin.auth()` resolves the DEFAULT app, which does
+// not exist here and throws "The default Firebase app does not exist". The auth
+// middleware called it that way and therefore rejected every bearer token with
+// a 401 the moment credentials were actually configured — invisible until now
+// only because the unconfigured branch bypassed authentication entirely.
+async function verifyIdToken(token) {
+  if (!configured) throw new Error('Firebase admin not configured');
+  return admin.auth(app).verifyIdToken(token);
+}
+
+module.exports = {
+  isConfigured, createStaffUser, generatePasswordResetLink, deleteStaffUser, verifyIdToken,
+};

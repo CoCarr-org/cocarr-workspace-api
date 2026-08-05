@@ -37,12 +37,70 @@ Onboarding
 - **The reset link is returned once** (like core-api admin creation) — there's no
   re-fetch endpoint yet. Hand it to the employee.
 
-## Firebase is optional in dev
-`helper/firebaseAdmin.js` is lazy and degrades: with no `ADMIN_SERVICE_ACCOUNT`,
-staff-login creation is disabled, `approve()` still activates the employee but
-sets no `firebaseUid` (logged), and `authMiddleware` attaches a synthetic dev
-actor. A **real** Firebase failure during approve (e.g. email already exists) is
-surfaced as a 502, not swallowed. Never set `AUTH_DISABLED=true` in production.
+## Firebase: optional for staff logins, NEVER optional for auth
+`helper/firebaseAdmin.js` is lazy and degrades **for staff-login creation only**:
+with no `ADMIN_SERVICE_ACCOUNT`, `approve()` still activates the employee but
+sets no `firebaseUid` (logged). A **real** Firebase failure during approve (e.g.
+email already exists) is surfaced as a 502, not swallowed.
+
+**Authentication is the opposite — it fails closed.** `authMiddleware` has three
+modes: a trusted `x-gateway-key` edge (headers from cocarr-api-gateway, no second
+token verification), a dev bypass needing `AUTH_DISABLED=true` **and**
+`NODE_ENV !== 'production'`, and direct bearer-token verification. With neither
+`GATEWAY_KEY` nor `ADMIN_SERVICE_ACCOUNT`, every authenticated route answers
+**503 `AUTH_UNAVAILABLE`**; `GET /v1/health` reports which mode is live (`auth`
+field, from `helper/authMode.js`). Unconfigured credentials used to attach a
+synthetic dev actor, so a credentials typo in production made this an open API.
+
+> **`fb.verifyIdToken`, never `admin.auth()`.** This service initialises a
+> **named** app (`'workspace-admin'`), so `admin.auth()` resolves the default app,
+> which does not exist here and throws. The middleware called it that way and
+> therefore 401'd every bearer token the moment credentials were configured —
+> invisible only because the unconfigured branch skipped authentication entirely.
+
+## Every route is gated on a PLATFORM permission
+`middlewares/permissionMiddleware.js` + `helper/authorizationClient.js`. All 36
+routes carry `authenticate, requirePermission(module, action)`, which resolves
+`workspace.<module>.<action>` against **cocarr-authorization-service**. This
+service keeps no permission rules of its own — a second copy would drift from the
+first, and the charter puts every decision in one place.
+
+| Router | IAM module |
+|---|---|
+| departments, designations, teams | `orgStructure` |
+| employees, onboarding | `employees` |
+| candidates | `recruitment` |
+| access-requests | `accessRequests` |
+
+Onboarding is governed by `employees` because it is a stage of the employee
+lifecycle, not a separate thing to grant. Non-CRUD verbs map to the nearest
+action: `/hire`, `/advance`, `/decide` and `/:id/status` are all `update`.
+
+**Reads were previously unauthenticated entirely** — the whole employee
+directory, org chart and candidate pipeline were readable by anyone who could
+reach the port. Every GET now requires both authentication and a `read` permission.
+
+**Enforcement is ON by default** (`RBAC_ENFORCE=false` ⇒ dry-run: denials logged,
+requests allowed). Same flag name and meaning as core-api's, deliberately — two
+services in one platform disagreeing about what their enforcement switch means is
+how somebody turns off more than they intended.
+
+**A broken check is a DENIAL, not a pass.** IAM unreachable, slow, erroring, or
+refusing our gateway key ⇒ **503 `AUTHORIZATION_UNAVAILABLE`**. "The check broke"
+is not a reason to perform an unchecked write; core-api closed this exact
+fail-open path and this service starts closed. Note `fetch` does not throw on a
+4xx/5xx, so the client checks `res.ok` explicitly — without that an error body
+parses into an empty permission list and reads as "holds nothing", a silent total
+denial that looks like a permissions bug rather than the outage it is.
+
+**The dev-bypass actor is exempt.** It is not a real principal and has no
+assignments, so without the exemption every local request would 403 the moment
+IAM was reachable — and people would set `RBAC_ENFORCE=false` and leave it there,
+which is far worse than one narrow, explicit carve-out.
+
+**Permissions are cached for `PERMISSION_CACHE_MS` (default 15s)**, so a
+revocation takes up to that long to bite. Without a cache every gated call is two
+HTTP round-trips; `authorizationClient.forget(principalId)` clears one early.
 
 ## Access requests are workflow-only (for now)
 `POST /access-requests` + `/:id/decide` record an approve/reject decision. They
@@ -72,6 +130,9 @@ as effective access.
 ## Not built yet (next)
 - Object-storage upload for employee documents (currently stores a `fileKey`
   provided by the client; wire the same private-bucket proxy pattern as core-api).
-- IAM application on access-request approval (call authorization service/core-api).
+- IAM application on access-request approval — an approved request still leaves
+  `iamApplied` false. The approval CHAIN now exists in IAM
+  (`workspace.access-request.default`); writing the resulting role assignment
+  back is the remaining half.
 - Notifications and Settings sub-domains.
 - Tests.
