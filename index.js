@@ -44,5 +44,10 @@ db.sync({ alter: true })
   .then(() => Logger.info('Workspace schema synced.'))
   .catch((err) => Logger.error(`Schema sync failed: ${err.message}`))
   .finally(() => {
-    app.listen(PORT, '0.0.0.0', () => Logger.info(`cocarr-workspace-api listening on ${PORT}`));
+// Bind with NO host argument, so Node listens on :: with dual-stack and accepts
+// both IPv4 and IPv6. Railway's PRIVATE NETWORK IS IPv6-ONLY: a server bound to
+// '0.0.0.0' is reachable from the public edge and completely unreachable from
+// sibling services, which presents as the gateway 502-ing every upstream while
+// each upstream looks perfectly healthy on its own.
+    app.listen(PORT, () => Logger.info(`cocarr-workspace-api listening on ${PORT}`));
   });
