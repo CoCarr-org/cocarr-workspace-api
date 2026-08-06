@@ -19,7 +19,7 @@
     "mysql2": "^3.6.3",
     "sequelize": "^6.33.0",
     "swagger-ui-express": "^5.0.0",
-    "uuid": "^9.0.1",
+    "uuid": "^14.0.0",
     "winston": "^3.11.0"
   },
   "devDependencies": {
