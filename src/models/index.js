@@ -8,6 +8,7 @@ const Team = require('./team');
 const Employee = require('./employee');
 const EmployeeDocument = require('./employeeDocument');
 const Candidate = require('./candidate');
+const JobPosting = require('./jobPosting');
 const AccessRequest = require('./accessRequest');
 
 // --- Associations ----------------------------------------------------------
@@ -33,6 +34,11 @@ AccessRequest.belongsTo(Employee, { foreignKey: 'employeeId' });
 
 Candidate.belongsTo(Employee, { as: 'convertedEmployee', foreignKey: 'convertedEmployeeId' });
 
+// A candidate that arrived through the careers site is attached to the role
+// they applied for, so the pipeline shows what each application was FOR.
+JobPosting.hasMany(Candidate, { foreignKey: 'jobPostingId' });
+Candidate.belongsTo(JobPosting, { foreignKey: 'jobPostingId' });
+
 module.exports = {
   db,
   Counter,
@@ -42,5 +48,6 @@ module.exports = {
   Employee,
   EmployeeDocument,
   Candidate,
+  JobPosting,
   AccessRequest,
 };

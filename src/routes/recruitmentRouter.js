@@ -23,6 +23,13 @@ router.post('/:id/advance', [authenticate, requirePermission('recruitment', 'upd
   check('stage').notEmpty().withMessage('stage is required'),
   validate,
 ], ctrl.advanceStage);
+// The candidate's CV, streamed from private storage. Authenticated, which is
+// the entire point of moving résumés off a Drive link shared with ANYONE.
+// Declared BEFORE /:id/hire has no bearing, but it must stay above any bare
+// '/:id' handler if one is ever added below.
+router.get('/:id/resume', authenticate, requirePermission('recruitment', 'read'),
+  require('../controllers/careersController').resume);
+
 router.post('/:id/hire', authenticate, requirePermission('recruitment', 'update'), ctrl.hire);
 
 module.exports = router;
