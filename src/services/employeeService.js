@@ -55,8 +55,35 @@ async function create(body) {
   return Employee.create({ ...pick(body), status: 'onboarding', onboardingStage: 'profile' });
 }
 
+// THE PLATFORM OWNER'S EMPLOYEE RECORD IS NOT EDITABLE HERE.
+//
+// They hold super-admin unconditionally in IAM and it is restored on their next
+// request, so suspending or terminating this row would take away nothing while
+// looking like it had — and editing their email would point the record at an
+// account that is not the owner, quietly detaching the guard from the person.
+//
+// Enforced in the service rather than only hidden in the UI, because a control
+// that exists only in a screen is not a control. `isOwner` is also returned on
+// reads so a client can hide the actions instead of offering ones that 409.
+const OWNER_EMAIL = String(process.env.BOOTSTRAP_OWNER_EMAIL || 'cocarrluxury23@gmail.com')
+  .trim().toLowerCase();
+
+const isOwnerRow = (row) => Boolean(row?.email)
+  && String(row.email).trim().toLowerCase() === OWNER_EMAIL;
+
+function assertNotOwner(row, verb) {
+  if (isOwnerRow(row)) {
+    throw new CustomError(
+      `${OWNER_EMAIL} is the platform owner and cannot be ${verb}. `
+      + 'They hold every permission unconditionally; change BOOTSTRAP_OWNER_EMAIL to move ownership.',
+      409, 'OWNER_PROTECTED',
+    );
+  }
+}
+
 async function update(id, body) {
   const row = await getById(id);
+  assertNotOwner(row, 'edited');
   await row.update(pick(body));
   return row;
 }
@@ -67,8 +94,16 @@ async function setStatus(id, status) {
   const valid = ['active', 'suspended', 'terminated'];
   if (!valid.includes(status)) throw new CustomError(`status must be one of ${valid.join(', ')}`, 400, 'VALIDATION_ERROR');
   const row = await getById(id);
+  assertNotOwner(row, 'suspended or terminated');
   await row.update({ status });
   return row;
+}
+
+async function remove(id) {
+  const row = await getById(id);
+  assertNotOwner(row, 'deleted');
+  await row.destroy();
+  return { success: true };
 }
 
 async function directReports(id) {
@@ -128,6 +163,7 @@ async function setDocumentStatus(employeeId, documentId, status, note) {
 }
 
 module.exports = {
-  list, getById, create, update, setStatus, directReports, orgTree,
+  list, getById, create, update, setStatus, remove, directReports, orgTree,
+  isOwnerRow, OWNER_EMAIL,
   addDocument, listDocuments, setDocumentStatus,
 };
