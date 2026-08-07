@@ -9,6 +9,10 @@ module.exports = {
   },
   list: async (req, res, next) => { try { res.json(await svc.list(req.query)); } catch (e) { next(e); } },
   get: async (req, res, next) => { try { res.json(await svc.getById(req.params.id)); } catch (e) { next(e); } },
+  // Retry the IAM grant for a request approved while IAM was unreachable.
+  apply: async (req, res, next) => {
+    try { res.json(await svc.apply(req.params.id, req.actor && req.actor.uid)); } catch (e) { next(e); }
+  },
   decide: async (req, res, next) => {
     try {
       res.json(await svc.decide(req.params.id, {
