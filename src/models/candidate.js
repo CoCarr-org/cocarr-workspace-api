@@ -21,9 +21,12 @@ const Candidate = db.define('candidate', {
     defaultValue: 'applied',
   },
   notes: { type: DataTypes.TEXT, allowNull: true },
+  // Set when the application came through the public careers site.
+  // Null for a candidate added by hand inside the workspace.
+  jobPostingId: { type: DataTypes.STRING, allowNull: true },
   convertedEmployeeId: { type: DataTypes.STRING, allowNull: true },
 }, {
-  indexes: [{ fields: ['stage'] }, { fields: ['email'] }],
+  indexes: [{ fields: ['stage'] }, { fields: ['email'] }, { fields: ['jobPostingId'] }],
 });
 
 module.exports = Candidate;
