@@ -3,12 +3,33 @@ const { Employee } = require('../models');
 const { nextEmployeeCode } = require('../utils/employeeCode');
 const fb = require('../helper/firebaseAdmin');
 const Logger = require('../helper/logger');
+const iam = require('../helper/authorizationClient');
 
 const ORDER = ['profile', 'documents', 'review', 'approved'];
+
+// The approval this lifecycle waits on. IAM seeds the matching chain
+// (workspace.onboarding.default); a missing chain refuses the submission rather
+// than letting it through, so this cannot silently degrade to no approval.
+const REQUEST_TYPE = 'workspace.onboarding.approval';
+const SUBJECT_TYPE = 'employee';
 
 async function get(employeeId) {
   const emp = await Employee.findByPk(employeeId);
   if (!emp) throw new CustomError('Employee not found', 404, 'NOT_FOUND');
+
+  // The approval state belongs to IAM, so it is read rather than mirrored here.
+  // A copy in this table would be a second source of truth for "may this be
+  // approved", and the two would drift the first time a request was cancelled.
+  let approval = { status: 'none', requestId: null };
+  try {
+    const res = await iam.approvalStatusFor(SUBJECT_TYPE, employeeId, REQUEST_TYPE);
+    approval = { status: res?.status || 'none', requestId: res?.requestId || null };
+  } catch (e) {
+    // Reporting is not gating — a read that fails must not make the screen
+    // unusable. `approve` does its own check and refuses on error.
+    approval = { status: 'unknown', requestId: null, error: e.message };
+  }
+
   return {
     employeeId: emp.id,
     employeeCode: emp.employeeCode,
@@ -16,7 +37,43 @@ async function get(employeeId) {
     onboardingStage: emp.onboardingStage,
     firebaseLinked: Boolean(emp.firebaseUid),
     nextStage: ORDER[ORDER.indexOf(emp.onboardingStage) + 1] || null,
+    approval,
+    // What the UI should offer, decided here so the client never re-derives it.
+    canSubmit: emp.status === 'onboarding' && emp.onboardingStage === 'review'
+      && !['pending', 'approved'].includes(approval.status),
+    canApprove: emp.status === 'onboarding' && emp.onboardingStage === 'review'
+      && approval.status === 'approved',
   };
+}
+
+// HR submits a finished record for approval. This is the seam between "HR is
+// still working on it" and "somebody must sign it off".
+async function submit(employeeId, principalId) {
+  const emp = await Employee.findByPk(employeeId);
+  if (!emp) throw new CustomError('Employee not found', 404, 'NOT_FOUND');
+  if (emp.status !== 'onboarding') throw new CustomError('Employee is not in onboarding', 409, 'CONFLICT');
+  if (emp.onboardingStage !== 'review') {
+    throw new CustomError('Employee must be at the "review" stage to submit for approval', 409, 'CONFLICT');
+  }
+
+  try {
+    const request = await iam.openApprovalRequest({
+      requestType: REQUEST_TYPE,
+      subjectType: SUBJECT_TYPE,
+      subjectId: emp.id,
+      summary: `Onboarding approval — ${[emp.firstName, emp.lastName].filter(Boolean).join(' ')}`,
+      metadata: { email: emp.email, employeeId: emp.id },
+    }, principalId);
+    return { ...(await get(employeeId)), request };
+  } catch (e) {
+    // Surface IAM's own message: it distinguishes "already in flight" from "no
+    // chain configured", and those need different actions from the person.
+    throw new CustomError(
+      `Could not open the approval request: ${e.message}`,
+      e.status === 409 ? 409 : 502,
+      e.errorCode || 'APPROVAL_UNAVAILABLE',
+    );
+  }
 }
 
 // Move onboarding forward one (or to a specific) stage. Cannot skip ahead, and
@@ -48,6 +105,33 @@ async function approve(employeeId, { dateOfJoining } = {}) {
   if (emp.status === 'active') throw new CustomError('Employee is already active', 409, 'CONFLICT');
   if (emp.onboardingStage !== 'review') {
     throw new CustomError('Employee must be at the "review" stage to approve', 409, 'CONFLICT');
+  }
+
+  // THE APPROVAL GATE. Everything below this line is irreversible — an employee
+  // code is allocated from a counter and a Firebase user is created — so it runs
+  // only against a request IAM says was approved by whoever the chain names.
+  //
+  // A FAILED CHECK IS A REFUSAL, never a pass. "IAM is unreachable" is not a
+  // reason to mint a staff login; it is the same rule permissionMiddleware
+  // already applies to every gated route in this service.
+  let approval;
+  try {
+    approval = await iam.approvalStatusFor(SUBJECT_TYPE, emp.id, REQUEST_TYPE);
+  } catch (e) {
+    throw new CustomError(
+      `Could not confirm approval with IAM, so nothing was created: ${e.message}`,
+      503, 'APPROVAL_UNAVAILABLE',
+    );
+  }
+  if (approval?.status !== 'approved') {
+    throw new CustomError(
+      approval?.status === 'pending'
+        ? 'This onboarding is still waiting for approval'
+        : approval?.status === 'rejected'
+          ? 'This onboarding was rejected — fix what was flagged and submit it again'
+          : 'Submit this onboarding for approval before approving it',
+      409, 'NOT_APPROVED',
+    );
   }
 
   // 1) Business identity — EMP-000001 (never the Firebase UID).
@@ -90,4 +174,4 @@ async function approve(employeeId, { dateOfJoining } = {}) {
   };
 }
 
-module.exports = { get, advance, approve };
+module.exports = { get, advance, submit, approve };

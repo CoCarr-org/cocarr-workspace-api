@@ -20,4 +20,6 @@ router.post('/:id/decide', [authenticate, requirePermission('accessRequests', 'u
   validate,
 ], ctrl.decide);
 
+router.post('/:id/apply', authenticate, requirePermission('accessRequests', 'update'), ctrl.apply);
+
 module.exports = router;

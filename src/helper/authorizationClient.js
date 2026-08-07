@@ -77,6 +77,54 @@ function isConfigured() {
   return Boolean(BASE_URL);
 }
 
+// ── approval requests ────────────────────────────────────────────────────────
+//
+// IAM owns the workflow; this service owns the thing being approved. These are
+// the two questions and one command that boundary needs.
+//
+// NOT cached, unlike `effective`. A permission answer that is 15s stale merely
+// delays a revocation; an approval answer that is 15s stale could let the
+// irreversible step run against a request that was just rejected.
+async function iamFetch(path, { method = 'GET', body, principalId } = {}) {
+  const res = await fetch(`${BASE_URL}/v1${path}`, {
+    method,
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+    headers: {
+      'content-type': 'application/json',
+      ...(GATEWAY_KEY ? { 'x-gateway-key': GATEWAY_KEY } : {}),
+      ...(principalId ? { 'x-user-id': principalId } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const text = await res.text();
+  const parsed = text ? JSON.parse(text) : null;
+  if (!res.ok) {
+    const err = new Error(parsed?.error?.message || `IAM responded ${res.status}`);
+    err.status = res.status;
+    err.errorCode = parsed?.error?.code || null;
+    throw err;
+  }
+  return parsed;
+}
+
+const openApprovalRequest = (payload, principalId) => iamFetch('/approval-requests', {
+  method: 'POST', body: payload, principalId,
+});
+
+const approvalStatusFor = (subjectType, subjectId, requestType) => iamFetch(
+  `/approval-requests/subject/${encodeURIComponent(subjectType)}/${encodeURIComponent(subjectId)}`
+  + (requestType ? `?requestType=${encodeURIComponent(requestType)}` : ''),
+);
+
+const assignRole = (payload, principalId) => iamFetch('/assignments', {
+  method: 'POST', body: payload, principalId,
+});
+
+const listRoles = () => iamFetch('/roles?limit=200');
+
 Logger.info(`[iam] authorization service: ${BASE_URL} (cache ${CACHE_MS}ms)`);
 
-module.exports = { effective, forget, isConfigured };
+module.exports = {
+  effective, forget, isConfigured,
+  openApprovalRequest, approvalStatusFor, assignRole, listRoles,
+};
