@@ -33,6 +33,11 @@ const JobPosting = db.define('jobPosting', {
     defaultValue: 'full_time',
   },
   experience: { type: DataTypes.STRING, allowNull: true },
+  // The one-line blurb on the listings page. Separate from `description`
+  // because the card and the detail page are read in different moods — a card
+  // truncated from a full description reads as a sentence cut off, which is
+  // what every "first 140 characters" implementation looks like.
+  summary: { type: DataTypes.STRING(500), allowNull: true },
   description: { type: DataTypes.TEXT, allowNull: true },
   responsibilities: { type: DataTypes.TEXT, allowNull: true },
   requirements: { type: DataTypes.TEXT, allowNull: true },

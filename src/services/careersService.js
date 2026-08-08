@@ -23,7 +23,7 @@ const Logger = require('../helper/logger');
 
 const PUBLIC_ATTRIBUTES = [
   'id', 'slug', 'title', 'department', 'location', 'employmentType',
-  'experience', 'description', 'responsibilities', 'requirements',
+  'experience', 'summary', 'description', 'responsibilities', 'requirements',
   'openings', 'closesAt', 'createdAt',
 ];
 
