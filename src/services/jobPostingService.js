@@ -9,7 +9,7 @@ const crud = createCrudService({
   searchable: ['title', 'department', 'location'],
   allowed: [
     'title', 'slug', 'department', 'departmentId', 'location', 'employmentType',
-    'experience', 'description', 'responsibilities', 'requirements',
+    'experience', 'summary', 'description', 'responsibilities', 'requirements',
     'closesAt', 'openings',
     // `status` is NOT writable here — it moves through setStatus() so that
     // publishing a role is a deliberate act with its own validation, not a
