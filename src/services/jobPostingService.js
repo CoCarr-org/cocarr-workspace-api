@@ -55,19 +55,57 @@ async function update(id, body) {
   return row;
 }
 
+// A published posting is a public page; refusing beats advertising a role with
+// an empty heading and no body.
+function assertPublishable(row) {
+  if (!row.title || !row.description) {
+    throw new CustomError(
+      'A job needs a title and a description before it can be published.',
+      400, 'VALIDATION_ERROR',
+    );
+  }
+}
+
 async function setStatus(id, status) {
   const row = await crud.getById(id);
-  if (status === 'published') {
-    // A published posting is a public page; refusing here beats advertising a
-    // role with an empty description.
-    if (!row.title || !row.description) {
-      throw new CustomError(
-        'A job needs a title and a description before it can be published.',
-        400, 'VALIDATION_ERROR',
-      );
-    }
+  if (status === 'published') assertPublishable(row);
+  await row.update({ status, approvalNote: null });
+  return row;
+}
+
+// ── Approval workflow ──────────────────────────────────────────────────────
+// Submitting a draft for approval is a request, not a publish: it enters
+// `pending_approval` ("waiting for approval") and stays off the public site
+// until an approver publishes it. Kept distinct from setStatus so the caller
+// asks for the right thing and the validation lives with the transition.
+async function submitForApproval(id) {
+  const row = await crud.getById(id);
+  assertPublishable(row);
+  if (!['draft', 'closed'].includes(row.status)) {
+    throw new CustomError(`A ${row.status} posting cannot be submitted for approval`, 409, 'CONFLICT');
   }
-  await row.update({ status });
+  await row.update({ status: 'pending_approval', approvalNote: null });
+  return row;
+}
+
+async function approve(id) {
+  const row = await crud.getById(id);
+  if (row.status !== 'pending_approval') {
+    throw new CustomError('Only a posting awaiting approval can be approved', 409, 'CONFLICT');
+  }
+  assertPublishable(row);
+  await row.update({ status: 'published', approvalNote: null });
+  return row;
+}
+
+// Rejecting sends it back to draft WITH a reason, so the poster can fix and
+// resubmit rather than being bounced silently.
+async function rejectApproval(id, note) {
+  const row = await crud.getById(id);
+  if (row.status !== 'pending_approval') {
+    throw new CustomError('Only a posting awaiting approval can be rejected', 409, 'CONFLICT');
+  }
+  await row.update({ status: 'draft', approvalNote: note || null });
   return row;
 }
 
@@ -88,9 +126,12 @@ async function remove(id) {
 }
 
 // The list HR sees, with the number of applications per role — the one number
-// that makes the screen worth opening.
-async function list(query) {
-  const result = await crud.list(query);
+// that makes the screen worth opening. `?status=` drives the Active / Waiting
+// for approval / Closed / Draft tabs.
+async function list(query = {}) {
+  const filters = {};
+  if (query.status) filters.status = query.status;
+  const result = await crud.list({ ...query, filters });
   const rows = result.data || [];
   const counts = await Candidate.findAll({
     attributes: ['jobPostingId', [Candidate.sequelize.fn('COUNT', '*'), 'n']],
@@ -107,4 +148,5 @@ async function list(query) {
 
 module.exports = {
   ...crud, list, create, update, remove, setStatus, slugify,
+  submitForApproval, approve, rejectApproval,
 };

@@ -8,6 +8,9 @@ const Team = require('./team');
 const Employee = require('./employee');
 const EmployeeDocument = require('./employeeDocument');
 const Candidate = require('./candidate');
+const CandidateStageEvent = require('./candidateStageEvent');
+const InterviewRound = require('./interviewRound');
+const JobOffer = require('./jobOffer');
 const JobPosting = require('./jobPosting');
 const AccessRequest = require('./accessRequest');
 
@@ -39,6 +42,17 @@ Candidate.belongsTo(Employee, { as: 'convertedEmployee', foreignKey: 'convertedE
 JobPosting.hasMany(Candidate, { foreignKey: 'jobPostingId' });
 Candidate.belongsTo(JobPosting, { foreignKey: 'jobPostingId' });
 
+// Pipeline history, interview rounds and offers all hang off the candidate.
+Candidate.hasMany(CandidateStageEvent, { as: 'stageEvents', foreignKey: 'candidateId' });
+CandidateStageEvent.belongsTo(Candidate, { foreignKey: 'candidateId' });
+
+Candidate.hasMany(InterviewRound, { as: 'interviews', foreignKey: 'candidateId' });
+InterviewRound.belongsTo(Candidate, { foreignKey: 'candidateId' });
+
+Candidate.hasMany(JobOffer, { as: 'offers', foreignKey: 'candidateId' });
+JobOffer.belongsTo(Candidate, { foreignKey: 'candidateId' });
+JobOffer.belongsTo(JobPosting, { foreignKey: 'jobPostingId' });
+
 module.exports = {
   db,
   Counter,
@@ -48,6 +62,9 @@ module.exports = {
   Employee,
   EmployeeDocument,
   Candidate,
+  CandidateStageEvent,
+  InterviewRound,
+  JobOffer,
   JobPosting,
   AccessRequest,
 };

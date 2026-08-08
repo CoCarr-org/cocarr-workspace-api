@@ -13,6 +13,7 @@ router.use('/designations', require('./designationRouter'));
 router.use('/teams', require('./teamRouter'));
 router.use('/employees', require('./employeeRouter'));
 router.use('/candidates', require('./recruitmentRouter'));
+router.use('/offers', require('./offerRouter'));
 router.use('/job-postings', require('./jobPostingRouter'));
 // PUBLIC — see careersRouter. Mounted on its own prefix so the gateway can
 // allow exactly this through and nothing else.

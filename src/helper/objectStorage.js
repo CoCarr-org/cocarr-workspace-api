@@ -87,11 +87,16 @@ function decodeDataUri(dataUri) {
   return { buffer, contentType, ext: ALLOWED[contentType] };
 }
 
+// Offer letters live beside résumés, private, under their own prefix.
+const OFFER_FOLDER = 'offer';
+
 // Returns the KEY, never a URL. A URL implies a place it can be fetched from
-// without asking, which is exactly what these must not have.
-async function putResume(dataUri) {
+// without asking, which is exactly what these must not have. `folder` is the
+// prefix that both separates concerns in the shared bucket AND is enforced on
+// read, so one route can never be tricked into reading another's objects.
+async function putToFolder(folder, dataUri) {
   const { buffer, contentType } = decodeDataUri(dataUri);
-  const key = `${RESUME_FOLDER}/${uuidv4()}`;
+  const key = `${folder}/${uuidv4()}`;
   await client().send(new PutObjectCommand({
     Bucket: bucketName(),
     Key: key,
@@ -101,16 +106,22 @@ async function putResume(dataUri) {
   return { key, contentType, size: buffer.length };
 }
 
-async function getResume(key) {
-  // Refuse to fetch anything outside the résumé folder, so this route can never
-  // be turned into a general reader for the platform's whole bucket by passing
-  // it someone's KYC key.
-  if (!String(key || '').startsWith(`${RESUME_FOLDER}/`)) {
-    throw new CustomError('Not a résumé object', 400, 'VALIDATION_ERROR');
+async function getFromFolder(folder, key) {
+  // Refuse to fetch anything outside the expected folder, so this route can
+  // never be turned into a general reader for the platform's whole bucket by
+  // passing it someone's KYC key.
+  if (!String(key || '').startsWith(`${folder}/`)) {
+    throw new CustomError(`Not a ${folder} object`, 400, 'VALIDATION_ERROR');
   }
   return client().send(new GetObjectCommand({ Bucket: bucketName(), Key: key }));
 }
 
+const putResume = (dataUri) => putToFolder(RESUME_FOLDER, dataUri);
+const getResume = (key) => getFromFolder(RESUME_FOLDER, key);
+const putOfferLetter = (dataUri) => putToFolder(OFFER_FOLDER, dataUri);
+const getOfferLetter = (key) => getFromFolder(OFFER_FOLDER, key);
+
 module.exports = {
-  putResume, getResume, RESUME_FOLDER, ALLOWED, MAX_BYTES,
+  putResume, getResume, putOfferLetter, getOfferLetter,
+  RESUME_FOLDER, OFFER_FOLDER, ALLOWED, MAX_BYTES,
 };

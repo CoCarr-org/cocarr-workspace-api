@@ -47,11 +47,23 @@ const JobPosting = db.define('jobPosting', {
   // Deliberately separate from a delete: a role that is filled or paused should
   // stop being advertised while keeping every application already attached to
   // it. Deleting the posting to hide it would orphan those candidates.
+  // Lifecycle: draft → pending_approval → published → closed.
+  //   draft            — being written, not advertised, editable freely
+  //   pending_approval — submitted, waiting for an approver ("waiting for approval")
+  //   published        — live on the public careers site (the ONLY status it reads)
+  //   closed           — filled/paused; keeps its applications but is off the site
+  // The HR listing tabs map to this directly: Active = published, Waiting for
+  // approval = pending_approval, Closed = closed (drafts show under their own
+  // filter). Approval is a status move, not a delete — a role that is filled or
+  // rejected keeps every application attached to it.
   status: {
-    type: DataTypes.ENUM('draft', 'published', 'closed'),
+    type: DataTypes.ENUM('draft', 'pending_approval', 'published', 'closed'),
     allowNull: false,
     defaultValue: 'draft',
   },
+  // Why an approver sent a submission back to draft — shown to the poster so the
+  // rejection is actionable rather than a silent bounce.
+  approvalNote: { type: DataTypes.TEXT, allowNull: true },
   // When set and in the past, the role stops accepting applications even while
   // still listed — the site can then say "closed" rather than 404.
   closesAt: { type: DataTypes.DATE, allowNull: true },

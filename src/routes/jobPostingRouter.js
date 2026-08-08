@@ -34,4 +34,13 @@ router.post('/:id/status', [
   validate,
 ], ctrl.setStatus);
 
+// Approval workflow. Submitting is part of authoring the post (`update`);
+// approving/rejecting is a governance action gated on its own `approve`
+// permission, so "who can post" and "who can approve a post" are grantable
+// separately (separation of duties). The `approve` action is seeded in
+// cocarr-authorization-service alongside the recruitment module.
+router.post('/:id/submit', authenticate, requirePermission('recruitment', 'update'), ctrl.submitForApproval);
+router.post('/:id/approve', authenticate, requirePermission('recruitment', 'approve'), ctrl.approve);
+router.post('/:id/reject', authenticate, requirePermission('recruitment', 'approve'), ctrl.reject);
+
 module.exports = router;
