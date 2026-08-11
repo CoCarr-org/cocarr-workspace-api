@@ -6,7 +6,12 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "echo \"No tests yet\" && exit 0"
+    "test": "echo \"No tests yet\" && exit 0",
+    "migrate:status": "node scripts/migrate.js status",
+    "migrate:up": "node scripts/migrate.js up",
+    "migrate:down": "node scripts/migrate.js down",
+    "migrate:check": "node scripts/migrate.js pending",
+    "db:ensure": "node scripts/ensureDatabase.js"
   },
   "license": "MIT",
   "dependencies": {
@@ -20,6 +25,7 @@
     "mysql2": "^3.6.3",
     "sequelize": "^6.33.0",
     "swagger-ui-express": "^5.0.0",
+    "umzug": "^3.8.3",
     "uuid": "^10.0.0",
     "winston": "^3.11.0"
   },
