@@ -10,7 +10,7 @@ fs.mkdirSync('logs', { recursive: true });
 const Logger = require('./src/helper/logger');
 // Register every model + association BEFORE db.sync (same discipline as core-api).
 const { db } = require('./src/models');
-const rootRouter = require('./src/routes/rootRouter');
+const { mountVersions } = require('./src/routes/apiVersions');
 const { errorHandlerMiddleware } = require('./src/middlewares/error');
 
 const app = express();
@@ -32,7 +32,9 @@ if (CORS_ORIGINS.length === 0) {
 app.use(bodyParser.json({ limit: '12mb' }));
 app.use(bodyParser.urlencoded({ limit: '12mb', extended: true }));
 
-app.use('/v1', rootRouter);
+// Every supported API version is mounted from one registry, which also emits
+// the Deprecation/Sunset headers and serves GET /versions.
+mountVersions(app, { log: Logger });
 app.use(errorHandlerMiddleware);
 
 const PORT = process.env.PORT || 3040;
@@ -44,16 +46,42 @@ const PORT = process.env.PORT || 3040;
 // rather than as a confusing sync error. Never throws.
 const { preflight } = require('./src/configs/dbPreflight');
 
+const { status: migrationStatus } = require('./src/db/migrator');
+
+// THE SERVICE NO LONGER CHANGES THE SCHEMA. Migrations do, as a release step
+// (`npm run migrate:up`), before the new revision takes traffic.
+//
+// `db.sync({ alter: true })` is gone from the boot path: it dropped any column
+// no longer declared on a model, aborted its whole pass on one bad foreign key
+// leaving later models with no tables, and accumulated indexes toward MySQL's
+// 64-key limit — on every boot, irreversibly. With 12 tables carrying real
+// foreign keys between them, an aborted pass here silently loses whichever
+// tables happened to come after the failure.
+//
+// Boot now only REPORTS drift. Development can still use sync explicitly via
+// DB_SYNC=true.
 preflight(db, Logger)
-  .then(({ ok }) => {
-    if (!ok) return Promise.reject(new Error('database unreachable'));
-    return db.sync({ alter: true }).then(() => Logger.info('Workspace schema synced.'));
+  .then(async ({ ok }) => {
+    if (!ok) return; // already reported, in detail, by the preflight
+
+    if (process.env.DB_SYNC === 'true' && process.env.NODE_ENV !== 'production') {
+      Logger.error('DB_SYNC=true — using db.sync({alter:true}). Development only; never set this in production.');
+      await db.sync({ alter: true });
+      Logger.info('Workspace schema synced (DB_SYNC).');
+      return;
+    }
+
+    const { executed, pending } = await migrationStatus();
+    if (pending.length) {
+      Logger.error('!!! PENDING MIGRATIONS — THIS REVISION IS RUNNING AGAINST AN OLD SCHEMA !!!');
+      Logger.error(`  pending (${pending.length}): ${pending.join(', ')}`);
+      Logger.error('  Run `npm run migrate:up` as a release step BEFORE this revision takes traffic.');
+      return;
+    }
+    Logger.info(`Schema up to date — ${executed.length} migration(s) applied.`);
   })
   .catch((err) => {
-    if (err.message === 'database unreachable') return; // already reported above
-    Logger.error('!!! SCHEMA SYNC FAILED — TABLES MAY BE MISSING !!!');
-    Logger.error(`  reason: ${err?.parent?.sqlMessage || err.message}`);
-    Logger.error('  Check with scripts/ensureDatabase.js --dry-run');
+    Logger.error(`Could not determine migration status: ${err?.parent?.sqlMessage || err.message}`);
   })
   .finally(() => {
 // Bind with NO host argument, so Node listens on :: with dual-stack and accepts
