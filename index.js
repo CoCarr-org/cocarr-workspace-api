@@ -40,9 +40,21 @@ const PORT = process.env.PORT || 3040;
 // Sync the schema, then listen. If sync fails (e.g. DB not reachable at boot) we
 // still listen so /v1/health can report the degraded state rather than the whole
 // process being unreachable.
-db.sync({ alter: true })
-  .then(() => Logger.info('Workspace schema synced.'))
-  .catch((err) => Logger.error(`Schema sync failed: ${err.message}`))
+// Classify the connection BEFORE sync, so a missing schema is reported as that
+// rather than as a confusing sync error. Never throws.
+const { preflight } = require('./src/configs/dbPreflight');
+
+preflight(db, Logger)
+  .then(({ ok }) => {
+    if (!ok) return Promise.reject(new Error('database unreachable'));
+    return db.sync({ alter: true }).then(() => Logger.info('Workspace schema synced.'));
+  })
+  .catch((err) => {
+    if (err.message === 'database unreachable') return; // already reported above
+    Logger.error('!!! SCHEMA SYNC FAILED — TABLES MAY BE MISSING !!!');
+    Logger.error(`  reason: ${err?.parent?.sqlMessage || err.message}`);
+    Logger.error('  Check with scripts/ensureDatabase.js --dry-run');
+  })
   .finally(() => {
 // Bind with NO host argument, so Node listens on :: with dual-stack and accepts
 // both IPv4 and IPv6. Railway's PRIVATE NETWORK IS IPv6-ONLY: a server bound to
