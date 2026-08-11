@@ -85,19 +85,6 @@ function isConfigured() {
 // NOT cached, unlike `effective`. A permission answer that is 15s stale merely
 // delays a revocation; an approval answer that is 15s stale could let the
 // irreversible step run against a request that was just rejected.
-// A SERVICE-TO-SERVICE CALL STILL NEEDS A PRINCIPAL.
-//
-// IAM's trusted-edge mode treats `x-gateway-key` as proof the request came
-// through the gateway, and then REQUIRES `x-user-id` — a valid key with no user
-// is refused with "Gateway supplied no authenticated user", which is correct: the
-// key says where the request came from, not who is making it.
-//
-// Calls made by this service on nobody's behalf (resolving the baseline role
-// during a migration, for instance) therefore travel as an explicit system
-// actor rather than anonymously. Named so it is recognisable in an audit trail
-// as the service acting, not a person.
-const SYSTEM_PRINCIPAL = 'system:cocarr-workspace-api';
-
 async function iamFetch(path, { method = 'GET', body, principalId } = {}) {
   const res = await fetch(`${BASE_URL}/v1${path}`, {
     method,
@@ -105,7 +92,7 @@ async function iamFetch(path, { method = 'GET', body, principalId } = {}) {
     headers: {
       'content-type': 'application/json',
       ...(GATEWAY_KEY ? { 'x-gateway-key': GATEWAY_KEY } : {}),
-      'x-user-id': principalId || SYSTEM_PRINCIPAL,
+      ...(principalId ? { 'x-user-id': principalId } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
