@@ -5,7 +5,7 @@ module.exports = {
     try { res.json(await svc.list(req.query)); } catch (e) { next(e); }
   },
   get: async (req, res, next) => {
-    try { res.json(await svc.getById(req.params.id)); } catch (e) { next(e); }
+    try { res.json(await svc.getDetail(req.params.id)); } catch (e) { next(e); }
   },
   create: async (req, res, next) => {
     try { res.status(201).json(await svc.create(req.body)); } catch (e) { next(e); }
