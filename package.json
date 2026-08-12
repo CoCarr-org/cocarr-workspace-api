@@ -11,7 +11,8 @@
     "migrate:up": "node scripts/migrate.js up",
     "migrate:down": "node scripts/migrate.js down",
     "migrate:check": "node scripts/migrate.js pending",
-    "db:ensure": "node scripts/ensureDatabase.js"
+    "db:ensure": "node scripts/ensureDatabase.js",
+    "db:bootstrap": "node scripts/ensureDatabase.js --bootstrap"
   },
   "license": "MIT",
   "dependencies": {
@@ -31,5 +32,8 @@
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
+  },
+  "config": {
+    "expectedDbName": "cocarr_workspace"
   }
 }
