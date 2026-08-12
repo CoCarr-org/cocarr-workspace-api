@@ -18,18 +18,49 @@
 //
 // So creating a schema is always a deliberate act with `--confirm`.
 //
+// ...EXCEPT IN `--bootstrap`, WHICH IS THE SAME ACT MADE SAFE TO AUTOMATE.
+//
+// The manual gate exists to stop ONE thing: a typo in DB_NAME silently creating
+// an empty schema beside the real data. That risk disappears if the name is not
+// a free variable — so `--bootstrap` creates the schema only when DB_NAME
+// matches the name PINNED IN THIS REPO (package.json → config.expectedDbName),
+// and only where the environment has opted in with ALLOW_SCHEMA_BOOTSTRAP=true.
+// A typo then fails loudly instead of creating a decoy, which is exactly what
+// `--confirm` was protecting.
+//
+// WHY IT IS NEEDED AT ALL. The MySQL service creates exactly one schema on a
+// fresh volume — whatever MYSQL_DATABASE names (here: `cocarr_iam`). Every other
+// service's schema was created by hand and is declared nowhere, so a volume
+// reset, a restored backup, or a brand-new environment comes up missing them.
+// That is not hypothetical: `cocarr_workspace` disappeared exactly this way, and
+// the deploy could not recover on its own.
+//
+// IT IS OPT-IN PER ENVIRONMENT, and that is the point. In an environment holding
+// real data, a missing schema means something has gone badly wrong and the
+// deploy SHOULD stop — silently recreating it empty and letting migrations
+// rebuild the tables would produce a healthy-looking service with no data, and
+// nobody would notice until they went looking for a row. Set
+// ALLOW_SCHEMA_BOOTSTRAP=true on environments that are meant to be rebuildable
+// from nothing; leave it unset where losing the schema is an incident.
+//
 // SAFETY
 // - CREATE DATABASE IF NOT EXISTS only. It never drops, never alters, and does
 //   nothing at all when the schema is already there.
 // - It creates NO TABLES. Run the schema step afterwards (this service:
-//   scripts/syncTables.js) and then the seed.
+//   `npm run migrate:up`).
 // - It prints the other schemas on the instance first. If your data is sitting
 //   in one of them under a different name, the fix is to correct DB_NAME —
 //   NOT to create a new empty schema beside it.
 const mysql = require('mysql2/promise');
+const pkg = require('../package.json');
 
 const args = process.argv.slice(2);
-const dryRun = args.includes('--dry-run') || !args.includes('--confirm');
+const bootstrap = args.includes('--bootstrap');
+const dryRun = !bootstrap && (args.includes('--dry-run') || !args.includes('--confirm'));
+
+// The name this service is supposed to use, committed and reviewable. An env
+// var that disagrees with it is a misconfiguration, not an instruction.
+const EXPECTED_DB_NAME = pkg.config?.expectedDbName || null;
 
 const { DB_HOST, DB_USER, DB_PASS, DB_NAME } = process.env;
 const DB_PORT = process.env.DB_PORT || 3306;
@@ -49,6 +80,32 @@ const VALID_NAME = /^[A-Za-z0-9_]+$/;
     process.exit(1);
   }
 
+  // ── --bootstrap preconditions ──
+  //
+  // Both exits are 0, deliberately. This runs FIRST in the pre-deploy chain, and
+  // a non-zero here would fail the deploy with "bootstrap not enabled" — which
+  // is not the problem. If the schema really is missing, the very next step
+  // (`migrate:up`) fails with the preflight's actionable message, which is the
+  // error whoever is reading the log needs to see.
+  if (bootstrap) {
+    if (String(process.env.ALLOW_SCHEMA_BOOTSTRAP) !== 'true') {
+      console.log('[bootstrap] ALLOW_SCHEMA_BOOTSTRAP is not true — not creating anything.');
+      console.log('[bootstrap] Set it on environments that are meant to be rebuildable from nothing.');
+      process.exit(0);
+    }
+    if (!EXPECTED_DB_NAME) {
+      console.log('[bootstrap] No config.expectedDbName in package.json — refusing to guess a schema name.');
+      process.exit(0);
+    }
+    if (DB_NAME !== EXPECTED_DB_NAME) {
+      // The typo case the manual `--confirm` gate existed to catch. Creating
+      // `${DB_NAME}` here is precisely the silent-empty-schema disaster.
+      console.error(`[bootstrap] REFUSING: DB_NAME='${DB_NAME}' but this service expects '${EXPECTED_DB_NAME}'.`);
+      console.error('[bootstrap] Fix the environment variable — do not create a schema under the wrong name.');
+      process.exit(0);
+    }
+  }
+
   let conn;
   try {
     // Connect with NO database selected — that is the whole point; you cannot
@@ -58,7 +115,11 @@ const VALID_NAME = /^[A-Za-z0-9_]+$/;
     });
   } catch (error) {
     console.error(`Could not connect to ${DB_HOST}:${DB_PORT} — ${error.message}`);
-    process.exit(1);
+    // In the pre-deploy chain this is joined with `&&`, so exiting non-zero here
+    // would stop before `migrate:up` runs — and migrate's preflight is what
+    // CLASSIFIES the failure (unreachable host vs missing schema vs bad
+    // credentials) into something actionable. Let it be the one to report.
+    process.exit(bootstrap ? 0 : 1);
   }
 
   try {
@@ -93,6 +154,13 @@ const VALID_NAME = /^[A-Za-z0-9_]+$/;
 
     await conn.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
     console.log(`CREATED empty schema '${DB_NAME}'.`);
+    if (bootstrap) {
+      // Loud on purpose. An automated create is the one outcome nobody watches,
+      // and "the schema was missing and we made a new empty one" is something
+      // whoever reads this log later needs to be able to find.
+      console.log(`[bootstrap] '${DB_NAME}' did not exist and was created EMPTY. Migrations will build it from zero.`);
+      console.log('[bootstrap] If this schema was expected to hold data, that data is gone — investigate.');
+    }
     console.log('It has no tables yet. Next:');
     console.log('  node scripts/syncTables.js --dry-run   then without the flag');
     console.log('  node scripts/seedTaxonomy.js --confirm');
