@@ -6,19 +6,24 @@
 //   node scripts/migrate.js down        roll back exactly ONE migration
 //   node scripts/migrate.js pending     exit 1 if anything is pending (for CI)
 //
-// RUN THIS AS A RELEASE STEP, NOT AT BOOT. Two reasons, both of which bite in
-// production and neither of which is obvious:
+// PREFER RUNNING THIS AS A RELEASE STEP — on Railway a pre-deploy command, in CI
+// a job that runs before the new revision receives traffic. It is the better
+// place for it, because a migration that fails there fails the release before any
+// new container starts.
 //
-//   1. Replicas race. Two containers starting together would run the same
-//      migration concurrently — MySQL DDL is not transactional, so you get a
-//      half-applied change and no way to tell which won.
-//   2. A failed migration must fail the DEPLOY, keeping the previous container
-//      serving. A service that boots anyway is running new code against an old
-//      schema, which is worse than being down: it looks healthy and writes to
-//      columns that may not exist.
+// BOOT ALSO APPLIES PENDING MIGRATIONS (index.js, unless AUTO_MIGRATE=false), so
+// an environment with no release step — local dev, a fresh environment, a
+// restored volume — is never left serving against a schema that was never built.
+// That used to be a manual step, and a missed one is indistinguishable from a
+// broken service: every query fails with "table doesn't exist".
 //
-// On Railway that means a pre-deploy/release command; in CI, a job that runs
-// before the new revision receives traffic.
+// The two hazards that made boot the wrong place are handled rather than assumed
+// away. Replicas racing: `migrateUp` holds a MySQL named lock, so the second
+// process waits and then finds nothing pending. A failed migration failing the
+// deploy: boot exits non-zero without listening, so the healthcheck never passes.
+//
+// Running this command WHILE a container is booting is therefore safe — one of
+// the two waits for the other on the same lock.
 const db = require('../src/configs/db');
 const { migrateUp, buildMigrator, status } = require('../src/db/migrator');
 const { preflight } = require('../src/configs/dbPreflight');
