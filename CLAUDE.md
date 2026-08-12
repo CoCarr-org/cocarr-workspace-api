@@ -120,8 +120,32 @@ as effective access.
 
 ## Run / verify
 - `PORT` (default **3040**), binds `0.0.0.0`. Health: `GET /v1/health`. Docs: `/v1/docs`.
-- The app **listens even if the DB sync fails** (`.finally`), so `/v1/health`
-  can report `db:false` rather than the process being unreachable.
+- The app **listens even if the DB is unreachable**, so `/v1/health` can report
+  `db:false` rather than the process being unreachable. A failed **migration** is
+  the one exception: it exits non-zero without listening (see below).
+
+## Schema: migrations apply themselves at boot
+Pending migrations run automatically at startup — there is no manual step, and no
+`migrate:up` to forget. `db.sync({alter:true})` is **not** coming back; migrations
+are versioned files applied once, in order, recorded in `schemaMigrations`.
+
+- Serialised across processes by a **MySQL named lock** (`src/db/migrationLock.js`),
+  so two replicas starting together cannot run the same DDL concurrently. The
+  second waits, then finds nothing pending.
+- A **failed** migration exits the process **without listening**, so the
+  healthcheck never passes and the previous container keeps serving. Booting
+  against a half-built schema is worse than being down — it looks healthy.
+- Railway still runs `npm run migrate:up` as `preDeployCommand` (railway.json);
+  that is the better place for it. Boot is the safety net for everywhere with no
+  release step: local dev, a fresh environment, a restored volume.
+- `AUTO_MIGRATE=false` reverts to report-only.
+
+This existed as a manual step and was missed: the service ran a full revision with
+none of its tables, answering `Table 'cocarr_workspace.jobPostings' doesn't exist`
+on every request while the banner explaining it scrolled past at startup.
+
+Schema *creation* is still separate and deliberate (`scripts/ensureDatabase.js`) —
+a typo in `DB_NAME` must fail loudly, not silently build a decoy schema.
 - Verified against a real MySQL: schema syncs (8 tables); permission enforcement
   is live against cocarr-authorization-service — an operations-agent gets
   `403 workspace.employees.read`, an hr-manager is served, and their

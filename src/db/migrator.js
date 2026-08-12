@@ -28,6 +28,7 @@ const path = require('path');
 const { Umzug, SequelizeStorage } = require('umzug');
 const db = require('../configs/db');
 const Logger = require('../helper/logger');
+const { withMigrationLock } = require('./migrationLock');
 
 // Applied migrations are recorded in THIS service's own schema, alongside its
 // tables — one instance, one schema per service, so each service's history is
@@ -70,16 +71,23 @@ function buildMigrator({ log = Logger } = {}) {
 // new code against a schema that failed to migrate is the worst of both worlds:
 // it looks healthy and writes to columns that may not exist. Failing the deploy
 // keeps the previous, working container serving.
+//
+// SERIALISED ACROSS PROCESSES by a MySQL named lock, because this is called both
+// by the release step and by boot — see migrationLock.js. The pending list is
+// re-read INSIDE the lock: a process that queued behind another must decide what
+// to apply from the schema as the winner left it, not as it looked while waiting.
 async function migrateUp({ log = Logger } = {}) {
-  const umzug = buildMigrator({ log });
-  const pending = await umzug.pending();
-  if (!pending.length) {
-    log.info('[migrate] schema up to date — no pending migrations.');
-    return [];
-  }
-  log.info(`[migrate] applying ${pending.length}: ${pending.map((p) => p.name).join(', ')}`);
-  const applied = await umzug.up();
-  return applied.map((m) => m.name);
+  return withMigrationLock(async () => {
+    const umzug = buildMigrator({ log });
+    const pending = await umzug.pending();
+    if (!pending.length) {
+      log.info('[migrate] schema up to date — no pending migrations.');
+      return [];
+    }
+    log.info(`[migrate] applying ${pending.length}: ${pending.map((p) => p.name).join(', ')}`);
+    const applied = await umzug.up();
+    return applied.map((m) => m.name);
+  }, { log });
 }
 
 async function status() {
